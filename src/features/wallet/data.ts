@@ -140,6 +140,23 @@ export async function saveWalletEntry(userId: string, entry: Entry) {
   if (error) throw error
 }
 
+export async function saveWalletEntries(userId: string, entries: Entry[]) {
+  const { error } = await getSupabase()
+    .from("wallet_entries")
+    .upsert(
+      entries.map((entry) => ({
+        id: entry.id,
+        user_id: userId,
+        amount: entry.amount,
+        type: entry.type,
+        entry_date: entry.date,
+        category: entry.category,
+        confirmed: entry.confirmed ?? false,
+      })),
+    )
+  if (error) throw error
+}
+
 export async function deleteWalletEntry(userId: string, id: string) {
   const { error } = await getSupabase()
     .from("wallet_entries")

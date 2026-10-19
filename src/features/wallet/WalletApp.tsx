@@ -16,6 +16,7 @@ import {
   renameWalletCategory,
   saveWalletCategory,
   saveWalletEntry,
+  saveWalletEntries,
 } from "./data";
 
 type WalletAppProps = {
@@ -67,6 +68,9 @@ export default function WalletApp({
   const [page, setPage] = useState<Page>("home");
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<EntryType>("expense");
+  const [instalmentsEnabled, setInstalmentsEnabled] = useState(false);
+  const [instalmentFrequency, setInstalmentFrequency] = useState<"weekly" | "fortnightly" | "monthly">("weekly");
+  const [instalmentCount, setInstalmentCount] = useState("3");
   const [date, setDate] = useState(getToday());
   const [category, setCategory] = useState("Food");
   const [newCategory, setNewCategory] = useState("");
@@ -76,6 +80,7 @@ export default function WalletApp({
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const numberOfInstalments = Number.parseInt(instalmentCount, 10);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +210,9 @@ export default function WalletApp({
     setEditingEntryId(null);
     setAmount("");
     setType("expense");
+    setInstalmentsEnabled(false);
+    setInstalmentFrequency("weekly");
+    setInstalmentCount("3");
     setDate(getToday());
     setCategory(categoryOptions[0] || "Other");
     setNewCategory("");
@@ -270,6 +278,7 @@ export default function WalletApp({
     setEditingEntryId(entry.id);
     setAmount(entry.amount.toFixed(2));
     setType(entry.type);
+    setInstalmentsEnabled(false);
     setDate(entry.date);
     setCategory(entry.category);
     setSelectedEntryId(null);
@@ -280,25 +289,64 @@ export default function WalletApp({
     const numericAmount = Number.parseFloat(amount);
     if (!numericAmount || numericAmount <= 0) return;
 
-    const updatedEntry: Entry = {
-      ...(editingEntryId
-        ? entries.find((entry) => entry.id === editingEntryId)
-        : undefined),
-      id: editingEntryId || crypto.randomUUID(),
-      amount: numericAmount,
-      type,
-      date,
-      category,
-      confirmed: date <= getToday(),
-    };
+    if (
+      instalmentsEnabled &&
+      (type !== "expense" || !Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60)
+    ) return;
+
+    const entriesToSave: Entry[] = instalmentsEnabled
+      ? (() => {
+          const totalCents = Math.round(numericAmount * 100);
+          const baseCents = Math.floor(totalCents / numberOfInstalments);
+          const extraCents = totalCents % numberOfInstalments;
+          const [year, month, day] = date.split("-").map(Number);
+          return Array.from({ length: numberOfInstalments }, (_, index) => {
+            let installmentDate: string;
+            if (instalmentFrequency === "monthly") {
+              const monthIndex = month - 1 + index;
+              const targetYear = year + Math.floor(monthIndex / 12);
+              const targetMonth = monthIndex % 12;
+              const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+              installmentDate = `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+            } else {
+              const interval = instalmentFrequency === "weekly" ? 7 : 14;
+              const nextDate = new Date(Date.UTC(year, month - 1, day + interval * index));
+              installmentDate = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}-${String(nextDate.getUTCDate()).padStart(2, "0")}`;
+            }
+            return {
+              id: crypto.randomUUID(),
+              amount: (baseCents + (index < extraCents ? 1 : 0)) / 100,
+              type: "expense" as const,
+              date: installmentDate,
+              category,
+              confirmed: installmentDate <= getToday(),
+            };
+          });
+        })()
+      : [{
+          ...(editingEntryId
+            ? entries.find((entry) => entry.id === editingEntryId)
+            : undefined),
+          id: editingEntryId || crypto.randomUUID(),
+          amount: numericAmount,
+          type,
+          date,
+          category,
+          confirmed: date <= getToday(),
+        }];
+
     try {
-      await saveWalletEntry(userId, updatedEntry);
+      if (instalmentsEnabled) {
+        await saveWalletEntries(userId, entriesToSave);
+      } else {
+        await saveWalletEntry(userId, entriesToSave[0]);
+      }
       setEntries((current) =>
         editingEntryId
           ? current.map((entry) =>
-              entry.id === editingEntryId ? updatedEntry : entry,
+              entry.id === editingEntryId ? entriesToSave[0] : entry,
             )
-          : [...current, updatedEntry],
+          : [...current, ...entriesToSave],
       );
       setDataError("");
     } catch (error) {
@@ -920,7 +968,7 @@ export default function WalletApp({
               />
             </div>
 
-            <div className="segmented-control">
+                    <div className="segmented-control grid-cols-3">
               <button
                 className={type === "expense" ? "selected" : ""}
                 onClick={() => setType("expense")}
@@ -930,12 +978,73 @@ export default function WalletApp({
               </button>
               <button
                 className={type === "income" ? "selected" : ""}
-                onClick={() => setType("income")}
+                onClick={() => {
+                  setType("income");
+                  setInstalmentsEnabled(false);
+                }}
                 type="button"
               >
                 Income
               </button>
             </div>
+
+            {!editingEntryId && type === "expense" && (
+              <div className="mt-5 rounded-2xl border border-black/[0.08] bg-white/55 p-4">
+                <label className="flex cursor-pointer items-center justify-between gap-4">
+                  <span>
+                    <strong className="block text-sm font-semibold text-[#171715]">
+                      Pay in instalments
+                    </strong>
+                    <small className="mt-1 block text-xs text-[#777772]">
+                      Split the total into scheduled expenses
+                    </small>
+                  </span>
+                  <input
+                    aria-label="Pay in instalments"
+                    checked={instalmentsEnabled}
+                    className="h-5 w-5 accent-[#171715]"
+                    onChange={(event) => setInstalmentsEnabled(event.target.checked)}
+                    type="checkbox"
+                  />
+                </label>
+                {instalmentsEnabled && (
+                  <div className="mt-4 border-t border-black/[0.08] pt-4">
+                    <p className="mb-2 text-xs font-semibold text-[#777772]">
+                      Payment frequency
+                    </p>
+                    <div className="segmented-control">
+                      {(["weekly", "fortnightly", "monthly"] as const).map((frequency) => (
+                        <button
+                          className={instalmentFrequency === frequency ? "selected" : ""}
+                          key={frequency}
+                          onClick={() => setInstalmentFrequency(frequency)}
+                          type="button"
+                        >
+                          {frequency[0].toUpperCase() + frequency.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="mt-4 flex items-center justify-between gap-4 text-sm">
+                      <span className="font-medium text-[#171715]">Number of instalments</span>
+                      <input
+                        aria-label="Number of instalments"
+                        className="w-20 rounded-xl border border-black/[0.12] bg-white px-3 py-2 text-center"
+                        max={60}
+                        min={2}
+                        onChange={(event) => setInstalmentCount(event.target.value)}
+                        type="number"
+                        value={instalmentCount}
+                      />
+                    </label>
+                    <p className="mt-3 text-xs text-[#777772]">
+                      {Number.isInteger(numberOfInstalments) && numberOfInstalments >= 2 && numberOfInstalments <= 60
+                        ? `${numberOfInstalments} payments of about ${formatMoney(Math.round((Number.parseFloat(amount || "0") * 100) / numberOfInstalments) / 100)}. The first is on the selected date.`
+                        : "Choose between 2 and 60 instalments."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             <label className="field-row date-field">
               <span className="field-icon">
@@ -1002,7 +1111,11 @@ export default function WalletApp({
 
             <button
               className="save-button"
-              disabled={!Number.parseFloat(amount)}
+              disabled={
+                !Number.parseFloat(amount) ||
+                (instalmentsEnabled &&
+                  (!Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60))
+              }
               onClick={saveEntry}
               type="button"
             >

@@ -1,71 +1,71 @@
-import { useState, type FormEvent } from "react"
-import { getSupabase } from "../../lib/supabase"
+import { useState, type FormEvent } from "react";
+import { getSupabase } from "../../lib/supabase";
 
-type AuthMethod = "password" | "magic-link"
-type PasswordAction = "sign-in" | "sign-up"
+type AuthMethod = "password" | "magic-link";
+type PasswordAction = "sign-in" | "sign-up";
 
 export default function AuthScreen() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [authMethod, setAuthMethod] = useState<AuthMethod>("password")
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authMethod, setAuthMethod] = useState<AuthMethod>("password");
   const [passwordAction, setPasswordAction] =
-    useState<PasswordAction>("sign-in")
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [notice, setNotice] = useState("")
-  const [error, setError] = useState("")
+    useState<PasswordAction>("sign-in");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setIsSubmitting(true)
-    setNotice("")
-    setError("")
+    event.preventDefault();
+    setIsSubmitting(true);
+    setNotice("");
+    setError("");
 
     try {
-      const auth = getSupabase().auth
-      const normalizedEmail = email.trim()
+      const auth = getSupabase().auth;
+      const normalizedEmail = email.trim();
 
       if (authMethod === "magic-link") {
         const { error: authError } = await auth.signInWithOtp({
           email: normalizedEmail,
           options: { emailRedirectTo: window.location.origin },
-        })
-        if (authError) throw authError
-        setNotice(`Check ${normalizedEmail} for your sign-in link.`)
+        });
+        if (authError) throw authError;
+        setNotice(`Check ${normalizedEmail} for your sign-in link.`);
       } else if (passwordAction === "sign-up") {
         const { data, error: authError } = await auth.signUp({
           email: normalizedEmail,
           password,
           options: { emailRedirectTo: window.location.origin },
-        })
-        if (authError) throw authError
+        });
+        if (authError) throw authError;
         if (!data.session) {
           setNotice(
             `Account created. Check ${normalizedEmail} for the email confirmation link, then return here to sign in.`,
-          )
+          );
         }
       } else {
         const { error: authError } = await auth.signInWithPassword({
           email: normalizedEmail,
           password,
-        })
-        if (authError) throw authError
+        });
+        if (authError) throw authError;
       }
     } catch (authError) {
       setError(
         authError instanceof Error
           ? authError.message
           : "Authentication failed. Please try again.",
-      )
+      );
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   const chooseMethod = (method: AuthMethod) => {
-    setAuthMethod(method)
-    setNotice("")
-    setError("")
-  }
+    setAuthMethod(method);
+    setNotice("");
+    setError("");
+  };
 
   return (
     <main className="app-shell grid min-h-[100dvh] place-items-center px-6 py-12">
@@ -118,9 +118,9 @@ export default function AuthScreen() {
                   : "text-[#777772]"
               }
               onClick={() => {
-                setPasswordAction("sign-in")
-                setNotice("")
-                setError("")
+                setPasswordAction("sign-in");
+                setNotice("");
+                setError("");
               }}
               type="button"
             >
@@ -133,9 +133,9 @@ export default function AuthScreen() {
                   : "text-[#777772]"
               }
               onClick={() => {
-                setPasswordAction("sign-up")
-                setNotice("")
-                setError("")
+                setPasswordAction("sign-up");
+                setNotice("");
+                setError("");
               }}
               type="button"
             >
@@ -205,5 +205,5 @@ export default function AuthScreen() {
         )}
       </section>
     </main>
-  )
+  );
 }
