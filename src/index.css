@@ -995,6 +995,17 @@ button {
   }
 }
 
+/* iOS Safari zooms the page when a focused form control uses text below 16px. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]) {
+    font-size: 16px;
+  }
+
+  .amount-field input:not([type="checkbox"]) {
+    font-size: clamp(3.3rem, 16vw, 4.6rem);
+  }
+}
+
 .category-section > p {
   margin: 0 0 10px 4px;
   color: #666661;
