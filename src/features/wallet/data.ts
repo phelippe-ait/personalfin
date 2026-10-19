@@ -1,5 +1,5 @@
 import { defaultCategories, getToday } from "./utils"
-import { supabase } from "../../lib/supabase"
+import { getSupabase } from "../../lib/supabase"
 import type { Entry } from "./types"
 
 type EntryRow = {
@@ -31,7 +31,7 @@ export async function migrateLegacyData(userId: string) {
     categories.every((item) => typeof item === "string") &&
     categories.length > 0
   ) {
-    const { error } = await supabase.from("wallet_categories").upsert(
+    const { error } = await getSupabase().from("wallet_categories").upsert(
       categories.map((name) => ({ user_id: userId, name: name.trim() })),
       { onConflict: "user_id,name", ignoreDuplicates: true },
     )
@@ -50,7 +50,7 @@ export async function migrateLegacyData(userId: string) {
       confirmed: entry.confirmed ?? entry.date <= getToday(),
     }))
     if (entries.length) {
-      const { error } = await supabase
+      const { error } = await getSupabase()
         .from("wallet_entries")
         .upsert(entries, { onConflict: "id" })
       if (error) throw error
@@ -83,12 +83,12 @@ function isUuid(value: string) {
 
 export async function loadWalletData(userId: string) {
   const [entriesResult, categoriesResult] = await Promise.all([
-    supabase
+    getSupabase()
       .from("wallet_entries")
       .select("id, amount, type, entry_date, category, confirmed")
       .eq("user_id", userId)
       .order("entry_date", { ascending: false }),
-    supabase
+    getSupabase()
       .from("wallet_categories")
       .select("name")
       .eq("user_id", userId)
@@ -99,7 +99,7 @@ export async function loadWalletData(userId: string) {
 
   let categories = categoriesResult.data.map((row) => row.name)
   if (categories.length === 0) {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from("wallet_categories")
       .upsert(
         defaultCategories.map((name) => ({ user_id: userId, name })),
@@ -128,7 +128,7 @@ export async function loadWalletData(userId: string) {
 }
 
 export async function saveWalletEntry(userId: string, entry: Entry) {
-  const { error } = await supabase.from("wallet_entries").upsert({
+  const { error } = await getSupabase().from("wallet_entries").upsert({
     id: entry.id,
     user_id: userId,
     amount: entry.amount,
@@ -141,7 +141,7 @@ export async function saveWalletEntry(userId: string, entry: Entry) {
 }
 
 export async function deleteWalletEntry(userId: string, id: string) {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("wallet_entries")
     .delete()
     .eq("id", id)
@@ -150,7 +150,7 @@ export async function deleteWalletEntry(userId: string, id: string) {
 }
 
 export async function saveWalletCategory(userId: string, name: string) {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("wallet_categories")
     .upsert({ user_id: userId, name }, { onConflict: "user_id,name" })
   if (error) throw error
@@ -161,14 +161,14 @@ export async function renameWalletCategory(
   oldName: string,
   newName: string,
 ) {
-  const { error: categoryError } = await supabase
+  const { error: categoryError } = await getSupabase()
     .from("wallet_categories")
     .update({ name: newName })
     .eq("user_id", userId)
     .eq("name", oldName)
   if (categoryError) throw categoryError
 
-  const { error: entriesError } = await supabase
+  const { error: entriesError } = await getSupabase()
     .from("wallet_entries")
     .update({ category: newName })
     .eq("user_id", userId)

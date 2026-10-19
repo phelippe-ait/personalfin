@@ -1,28 +1,70 @@
 import { useState, type FormEvent } from "react"
-import { supabase } from "../../lib/supabase"
+import { getSupabase } from "../../lib/supabase"
+
+type AuthMethod = "password" | "magic-link"
+type PasswordAction = "sign-in" | "sign-up"
 
 export default function AuthScreen() {
   const [email, setEmail] = useState("")
-  const [isSending, setIsSending] = useState(false)
-  const [sent, setSent] = useState(false)
+  const [password, setPassword] = useState("")
+  const [authMethod, setAuthMethod] = useState<AuthMethod>("password")
+  const [passwordAction, setPasswordAction] =
+    useState<PasswordAction>("sign-in")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [notice, setNotice] = useState("")
   const [error, setError] = useState("")
 
-  const sendLink = async (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    setIsSending(true)
+    setIsSubmitting(true)
+    setNotice("")
     setError("")
 
-    const { error: authError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
-    })
+    try {
+      const auth = getSupabase().auth
+      const normalizedEmail = email.trim()
 
-    setIsSending(false)
-    if (authError) {
-      setError(authError.message)
-      return
+      if (authMethod === "magic-link") {
+        const { error: authError } = await auth.signInWithOtp({
+          email: normalizedEmail,
+          options: { emailRedirectTo: window.location.origin },
+        })
+        if (authError) throw authError
+        setNotice(`Check ${normalizedEmail} for your sign-in link.`)
+      } else if (passwordAction === "sign-up") {
+        const { data, error: authError } = await auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        })
+        if (authError) throw authError
+        if (!data.session) {
+          setNotice(
+            `Account created. Check ${normalizedEmail} for the email confirmation link, then return here to sign in.`,
+          )
+        }
+      } else {
+        const { error: authError } = await auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        })
+        if (authError) throw authError
+      }
+    } catch (authError) {
+      setError(
+        authError instanceof Error
+          ? authError.message
+          : "Authentication failed. Please try again.",
+      )
+    } finally {
+      setIsSubmitting(false)
     }
-    setSent(true)
+  }
+
+  const chooseMethod = (method: AuthMethod) => {
+    setAuthMethod(method)
+    setNotice("")
+    setError("")
   }
 
   return (
@@ -30,20 +72,87 @@ export default function AuthScreen() {
       <section className="w-full max-w-md rounded-[32px] border border-black/[0.07] bg-white/70 p-8 shadow-[0_24px_60px_rgba(20,20,18,0.09)] backdrop-blur-2xl">
         <p className="eyebrow">My wallet</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-[-0.06em]">
-          Sign in to your wallet
+          {authMethod === "magic-link"
+            ? "Sign in with a link"
+            : passwordAction === "sign-up"
+              ? "Create your account"
+              : "Sign in to your wallet"}
         </h1>
         <p className="mt-3 text-sm leading-6 text-[#777772]">
-          We’ll email you a secure sign-in link. Your transactions will sync
-          with your account.
+          Your transactions sync securely with your account.
         </p>
 
-        {sent ? (
-          <div className="mt-8 rounded-2xl bg-[#f0f0ec] p-5 text-sm leading-6">
-            Check your inbox for a sign-in link for <strong>{email}</strong>.
-            You can close this page after opening the link.
+        <div className="mt-6 grid grid-cols-2 rounded-full bg-[#f0f0ec] p-1">
+          <button
+            aria-pressed={authMethod === "password"}
+            className={`rounded-full px-3 py-2 text-sm font-semibold ${
+              authMethod === "password"
+                ? "bg-white shadow-sm"
+                : "text-[#777772]"
+            }`}
+            onClick={() => chooseMethod("password")}
+            type="button"
+          >
+            Email & password
+          </button>
+          <button
+            aria-pressed={authMethod === "magic-link"}
+            className={`rounded-full px-3 py-2 text-sm font-semibold ${
+              authMethod === "magic-link"
+                ? "bg-white shadow-sm"
+                : "text-[#777772]"
+            }`}
+            onClick={() => chooseMethod("magic-link")}
+            type="button"
+          >
+            Magic link
+          </button>
+        </div>
+
+        {authMethod === "password" && (
+          <div className="mt-4 flex justify-center gap-4 text-sm">
+            <button
+              className={
+                passwordAction === "sign-in"
+                  ? "font-semibold"
+                  : "text-[#777772]"
+              }
+              onClick={() => {
+                setPasswordAction("sign-in")
+                setNotice("")
+                setError("")
+              }}
+              type="button"
+            >
+              Sign in
+            </button>
+            <button
+              className={
+                passwordAction === "sign-up"
+                  ? "font-semibold"
+                  : "text-[#777772]"
+              }
+              onClick={() => {
+                setPasswordAction("sign-up")
+                setNotice("")
+                setError("")
+              }}
+              type="button"
+            >
+              Create account
+            </button>
+          </div>
+        )}
+
+        {notice ? (
+          <div
+            className="mt-6 rounded-2xl bg-[#f0f0ec] p-5 text-sm leading-6"
+            role="status"
+          >
+            {notice}
           </div>
         ) : (
-          <form className="mt-8 grid gap-4" onSubmit={sendLink}>
+          <form className="mt-6 grid gap-4" onSubmit={submit}>
             <label className="grid gap-2 text-sm font-medium">
               Email address
               <input
@@ -56,13 +165,41 @@ export default function AuthScreen() {
                 value={email}
               />
             </label>
-            {error && <p className="text-sm text-red-700">{error}</p>}
+            {authMethod === "password" && (
+              <label className="grid gap-2 text-sm font-medium">
+                Password
+                <input
+                  autoComplete={
+                    passwordAction === "sign-up"
+                      ? "new-password"
+                      : "current-password"
+                  }
+                  className="rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:border-black/40"
+                  minLength={6}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={password}
+                />
+              </label>
+            )}
+            {error && (
+              <p className="text-sm text-red-700" role="alert">
+                {error}
+              </p>
+            )}
             <button
               className="rounded-full bg-[#10100f] px-5 py-3 font-semibold text-white disabled:opacity-50"
-              disabled={isSending}
+              disabled={isSubmitting}
               type="submit"
             >
-              {isSending ? "Sending link…" : "Email me a sign-in link"}
+              {isSubmitting
+                ? "Please wait…"
+                : authMethod === "magic-link"
+                  ? "Email me a sign-in link"
+                  : passwordAction === "sign-up"
+                    ? "Create account"
+                    : "Sign in"}
             </button>
           </form>
         )}
