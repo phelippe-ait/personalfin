@@ -24,6 +24,35 @@ type WalletAppProps = {
   onSignOut: () => Promise<unknown>;
 };
 
+function walletErrorMessage(error: unknown, fallback: string) {
+  const details =
+    error && typeof error === "object"
+      ? (error as { code?: unknown; message?: unknown }).message
+      : undefined;
+  const code =
+    error && typeof error === "object"
+      ? (error as { code?: unknown }).code
+      : undefined;
+  const message =
+    typeof details === "string"
+      ? details
+      : error instanceof Error
+        ? error.message
+        : "";
+
+  if (
+    code === "42P01" ||
+    code === "PGRST205" ||
+    /wallet_(entries|categories).*(does not exist|not find|schema cache)/i.test(
+      message,
+    )
+  ) {
+    return "Wallet database tables are missing. Run supabase/migrations/0005_wallet_tables.sql in your Supabase SQL Editor, then reload the app.";
+  }
+
+  return message || fallback;
+}
+
 export default function WalletApp({
   userId,
   userEmail,
@@ -62,9 +91,7 @@ export default function WalletApp({
         }
       } catch (error) {
         if (!cancelled) {
-          setDataError(
-            error instanceof Error ? error.message : "Could not load wallet data.",
-          );
+          setDataError(walletErrorMessage(error, "Could not load wallet data."));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -200,9 +227,7 @@ export default function WalletApp({
       setDataError("");
       return true;
     } catch (error) {
-      setDataError(
-        error instanceof Error ? error.message : "Could not save category.",
-      );
+      setDataError(walletErrorMessage(error, "Could not save category."));
       return false;
     }
   };
@@ -223,9 +248,7 @@ export default function WalletApp({
     try {
       await renameWalletCategory(userId, editingCategory, name);
     } catch (error) {
-      setDataError(
-        error instanceof Error ? error.message : "Could not rename category.",
-      );
+      setDataError(walletErrorMessage(error, "Could not rename category."));
       return;
     }
     setCategoryOptions((current) =>
@@ -279,9 +302,7 @@ export default function WalletApp({
       );
       setDataError("");
     } catch (error) {
-      setDataError(
-        error instanceof Error ? error.message : "Could not save transaction.",
-      );
+      setDataError(walletErrorMessage(error, "Could not save transaction."));
       return;
     }
     setEditingEntryId(null);
@@ -1077,11 +1098,7 @@ export default function WalletApp({
                       setSelectedEntryId(null);
                       setDataError("");
                     } catch (error) {
-                      setDataError(
-                        error instanceof Error
-                          ? error.message
-                          : "Could not delete transaction.",
-                      );
+                      setDataError(walletErrorMessage(error, "Could not delete transaction."));
                     }
                   }
                 }}
@@ -1109,11 +1126,7 @@ export default function WalletApp({
                     setSelectedEntryId(null);
                     setDataError("");
                   } catch (error) {
-                    setDataError(
-                      error instanceof Error
-                        ? error.message
-                        : "Could not confirm transaction.",
-                    );
+                    setDataError(walletErrorMessage(error, "Could not confirm transaction."));
                   }
                 }}
                 type="button"
