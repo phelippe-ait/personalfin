@@ -1,0 +1,10 @@
+{
+  "description": "Track and manage your expenses and income with an intuitive iOS-style interface featuring quick entry, date filtering, and organized transaction views.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
