@@ -25,6 +25,23 @@ type WalletAppProps = {
   onSignOut: () => Promise<unknown>;
 };
 
+type RepeatFrequency = "weekly" | "fortnightly" | "monthly";
+
+function getRepeatDate(startDate: string, frequency: RepeatFrequency, index: number) {
+  const [year, month, day] = startDate.split("-").map(Number);
+  if (frequency === "monthly") {
+    const monthIndex = month - 1 + index;
+    const targetYear = year + Math.floor(monthIndex / 12);
+    const targetMonth = monthIndex % 12;
+    const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    return `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
+  }
+
+  const interval = frequency === "weekly" ? 7 : 14;
+  const nextDate = new Date(Date.UTC(year, month - 1, day + interval * index));
+  return `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}-${String(nextDate.getUTCDate()).padStart(2, "0")}`;
+}
+
 function walletErrorMessage(error: unknown, fallback: string) {
   const details =
     error && typeof error === "object"
@@ -68,6 +85,9 @@ export default function WalletApp({
   const [page, setPage] = useState<Page>("home");
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<EntryType>("expense");
+  const [fixedExpenseEnabled, setFixedExpenseEnabled] = useState(false);
+  const [fixedExpenseFrequency, setFixedExpenseFrequency] = useState<RepeatFrequency>("monthly");
+  const [fixedExpenseCount, setFixedExpenseCount] = useState("12");
   const [instalmentsEnabled, setInstalmentsEnabled] = useState(false);
   const [instalmentFrequency, setInstalmentFrequency] = useState<"weekly" | "fortnightly" | "monthly">("weekly");
   const [instalmentCount, setInstalmentCount] = useState("3");
@@ -81,6 +101,7 @@ export default function WalletApp({
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const numberOfInstalments = Number.parseInt(instalmentCount, 10);
+  const numberOfFixedOccurrences = Number.parseInt(fixedExpenseCount, 10);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +231,9 @@ export default function WalletApp({
     setEditingEntryId(null);
     setAmount("");
     setType("expense");
+    setFixedExpenseEnabled(false);
+    setFixedExpenseFrequency("monthly");
+    setFixedExpenseCount("12");
     setInstalmentsEnabled(false);
     setInstalmentFrequency("weekly");
     setInstalmentCount("3");
@@ -278,6 +302,7 @@ export default function WalletApp({
     setEditingEntryId(entry.id);
     setAmount(entry.amount.toFixed(2));
     setType(entry.type);
+    setFixedExpenseEnabled(false);
     setInstalmentsEnabled(false);
     setDate(entry.date);
     setCategory(entry.category);
@@ -294,25 +319,30 @@ export default function WalletApp({
       (type !== "expense" || !Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60)
     ) return;
 
-    const entriesToSave: Entry[] = instalmentsEnabled
+    if (
+      fixedExpenseEnabled &&
+      (type !== "expense" || !Number.isInteger(numberOfFixedOccurrences) || numberOfFixedOccurrences < 2 || numberOfFixedOccurrences > 60)
+    ) return;
+
+    const entriesToSave: Entry[] = fixedExpenseEnabled
+      ? Array.from({ length: numberOfFixedOccurrences }, (_, index) => {
+          const occurrenceDate = getRepeatDate(date, fixedExpenseFrequency, index);
+          return {
+            id: crypto.randomUUID(),
+            amount: numericAmount,
+            type: "expense",
+            date: occurrenceDate,
+            category,
+            confirmed: occurrenceDate <= getToday(),
+          };
+        })
+      : instalmentsEnabled
       ? (() => {
           const totalCents = Math.round(numericAmount * 100);
           const baseCents = Math.floor(totalCents / numberOfInstalments);
           const extraCents = totalCents % numberOfInstalments;
-          const [year, month, day] = date.split("-").map(Number);
           return Array.from({ length: numberOfInstalments }, (_, index) => {
-            let installmentDate: string;
-            if (instalmentFrequency === "monthly") {
-              const monthIndex = month - 1 + index;
-              const targetYear = year + Math.floor(monthIndex / 12);
-              const targetMonth = monthIndex % 12;
-              const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
-              installmentDate = `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}-${String(Math.min(day, lastDay)).padStart(2, "0")}`;
-            } else {
-              const interval = instalmentFrequency === "weekly" ? 7 : 14;
-              const nextDate = new Date(Date.UTC(year, month - 1, day + interval * index));
-              installmentDate = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}-${String(nextDate.getUTCDate()).padStart(2, "0")}`;
-            }
+            const installmentDate = getRepeatDate(date, instalmentFrequency, index);
             return {
               id: crypto.randomUUID(),
               amount: (baseCents + (index < extraCents ? 1 : 0)) / 100,
@@ -336,7 +366,7 @@ export default function WalletApp({
         }];
 
     try {
-      if (instalmentsEnabled) {
+      if (instalmentsEnabled || fixedExpenseEnabled) {
         await saveWalletEntries(userId, entriesToSave);
       } else {
         await saveWalletEntry(userId, entriesToSave[0]);
@@ -981,6 +1011,7 @@ export default function WalletApp({
                 onClick={() => {
                   setType("income");
                   setInstalmentsEnabled(false);
+                  setFixedExpenseEnabled(false);
                 }}
                 type="button"
               >
@@ -1003,7 +1034,10 @@ export default function WalletApp({
                     aria-label="Pay in instalments"
                     checked={instalmentsEnabled}
                     className="h-5 w-5 accent-[#171715]"
-                    onChange={(event) => setInstalmentsEnabled(event.target.checked)}
+                    onChange={(event) => {
+                      setInstalmentsEnabled(event.target.checked);
+                      if (event.target.checked) setFixedExpenseEnabled(false);
+                    }}
                     type="checkbox"
                   />
                 </label>
@@ -1043,6 +1077,64 @@ export default function WalletApp({
                     </p>
                   </div>
                 )}
+                <div className="mt-4 border-t border-black/[0.08] pt-4">
+                  <label className="flex cursor-pointer items-center justify-between gap-4">
+                    <span>
+                      <strong className="block text-sm font-semibold text-[#171715]">
+                        Fixed expense
+                      </strong>
+                      <small className="mt-1 block text-xs text-[#777772]">
+                        Repeat the same amount on a schedule
+                      </small>
+                    </span>
+                    <input
+                      aria-label="Fixed expense"
+                      checked={fixedExpenseEnabled}
+                      className="h-5 w-5 accent-[#171715]"
+                      onChange={(event) => {
+                        setFixedExpenseEnabled(event.target.checked);
+                        if (event.target.checked) setInstalmentsEnabled(false);
+                      }}
+                      type="checkbox"
+                    />
+                  </label>
+                  {fixedExpenseEnabled && (
+                    <div className="mt-4">
+                      <p className="mb-2 text-xs font-semibold text-[#777772]">
+                        Repeat frequency
+                      </p>
+                      <div className="segmented-control">
+                        {(["weekly", "fortnightly", "monthly"] as const).map((frequency) => (
+                          <button
+                            className={fixedExpenseFrequency === frequency ? "selected" : ""}
+                            key={frequency}
+                            onClick={() => setFixedExpenseFrequency(frequency)}
+                            type="button"
+                          >
+                            {frequency[0].toUpperCase() + frequency.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                      <label className="mt-4 flex items-center justify-between gap-4 text-sm">
+                        <span className="font-medium text-[#171715]">Total occurrences</span>
+                        <input
+                          aria-label="Total occurrences"
+                          className="w-20 rounded-xl border border-black/[0.12] bg-white px-3 py-2 text-center"
+                          max={60}
+                          min={2}
+                          onChange={(event) => setFixedExpenseCount(event.target.value)}
+                          type="number"
+                          value={fixedExpenseCount}
+                        />
+                      </label>
+                      <p className="mt-3 text-xs text-[#777772]">
+                        {Number.isInteger(numberOfFixedOccurrences) && numberOfFixedOccurrences >= 2 && numberOfFixedOccurrences <= 60
+                          ? `Creates ${numberOfFixedOccurrences} scheduled expenses at ${formatMoney(numericAmount || 0)} each.`
+                          : "Choose between 2 and 60 occurrences."}
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1114,7 +1206,9 @@ export default function WalletApp({
               disabled={
                 !Number.parseFloat(amount) ||
                 (instalmentsEnabled &&
-                  (!Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60))
+                  (!Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60)) ||
+                (fixedExpenseEnabled &&
+                  (!Number.isInteger(numberOfFixedOccurrences) || numberOfFixedOccurrences < 2 || numberOfFixedOccurrences > 60))
               }
               onClick={saveEntry}
               type="button"
