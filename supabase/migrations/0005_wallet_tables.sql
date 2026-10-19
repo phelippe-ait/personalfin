@@ -16,6 +16,7 @@ create table if not exists public.wallet_entries (
   type text not null check (type in ('expense', 'income')),
   entry_date date not null,
   category text not null check (length(btrim(category)) between 1 and 24),
+  details text not null default '',
   confirmed boolean not null default false,
   created_at timestamptz not null default now()
 );

@@ -26,6 +26,7 @@ type WalletAppProps = {
 };
 
 type RepeatFrequency = "weekly" | "fortnightly" | "monthly";
+const fixedExpenseOccurrences = 12;
 
 function getRepeatDate(startDate: string, frequency: RepeatFrequency, index: number) {
   const [year, month, day] = startDate.split("-").map(Number);
@@ -67,6 +68,13 @@ function walletErrorMessage(error: unknown, fallback: string) {
   ) {
     return "Wallet database tables are missing. Run supabase/migrations/0005_wallet_tables.sql in your Supabase SQL Editor, then reload the app.";
   }
+  if (
+    code === "42703" ||
+    code === "PGRST204" ||
+    /column .*details.*(does not exist|schema cache)/i.test(message)
+  ) {
+    return "The wallet details field is missing from the database. Run supabase/migrations/0006_wallet_entry_details.sql in your Supabase SQL Editor, then reload the app.";
+  }
 
   return message || fallback;
 }
@@ -84,10 +92,10 @@ export default function WalletApp({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [page, setPage] = useState<Page>("home");
   const [amount, setAmount] = useState("");
+  const [details, setDetails] = useState("");
   const [type, setType] = useState<EntryType>("expense");
   const [fixedExpenseEnabled, setFixedExpenseEnabled] = useState(false);
   const [fixedExpenseFrequency, setFixedExpenseFrequency] = useState<RepeatFrequency>("monthly");
-  const [fixedExpenseCount, setFixedExpenseCount] = useState("12");
   const [instalmentsEnabled, setInstalmentsEnabled] = useState(false);
   const [instalmentFrequency, setInstalmentFrequency] = useState<"weekly" | "fortnightly" | "monthly">("weekly");
   const [instalmentCount, setInstalmentCount] = useState("3");
@@ -100,8 +108,8 @@ export default function WalletApp({
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const numericAmount = Number.parseFloat(amount);
   const numberOfInstalments = Number.parseInt(instalmentCount, 10);
-  const numberOfFixedOccurrences = Number.parseInt(fixedExpenseCount, 10);
 
   useEffect(() => {
     let cancelled = false;
@@ -230,10 +238,10 @@ export default function WalletApp({
   const openSheet = () => {
     setEditingEntryId(null);
     setAmount("");
+    setDetails("");
     setType("expense");
     setFixedExpenseEnabled(false);
     setFixedExpenseFrequency("monthly");
-    setFixedExpenseCount("12");
     setInstalmentsEnabled(false);
     setInstalmentFrequency("weekly");
     setInstalmentCount("3");
@@ -301,6 +309,7 @@ export default function WalletApp({
   const openEditSheet = (entry: Entry) => {
     setEditingEntryId(entry.id);
     setAmount(entry.amount.toFixed(2));
+    setDetails(entry.details ?? "");
     setType(entry.type);
     setFixedExpenseEnabled(false);
     setInstalmentsEnabled(false);
@@ -311,7 +320,6 @@ export default function WalletApp({
   };
 
   const saveEntry = async () => {
-    const numericAmount = Number.parseFloat(amount);
     if (!numericAmount || numericAmount <= 0) return;
 
     if (
@@ -319,13 +327,10 @@ export default function WalletApp({
       (type !== "expense" || !Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60)
     ) return;
 
-    if (
-      fixedExpenseEnabled &&
-      (type !== "expense" || !Number.isInteger(numberOfFixedOccurrences) || numberOfFixedOccurrences < 2 || numberOfFixedOccurrences > 60)
-    ) return;
+    if (fixedExpenseEnabled && type !== "expense") return;
 
     const entriesToSave: Entry[] = fixedExpenseEnabled
-      ? Array.from({ length: numberOfFixedOccurrences }, (_, index) => {
+      ? Array.from({ length: fixedExpenseOccurrences }, (_, index) => {
           const occurrenceDate = getRepeatDate(date, fixedExpenseFrequency, index);
           return {
             id: crypto.randomUUID(),
@@ -334,6 +339,7 @@ export default function WalletApp({
             date: occurrenceDate,
             category,
             confirmed: occurrenceDate <= getToday(),
+            details,
           };
         })
       : instalmentsEnabled
@@ -350,6 +356,7 @@ export default function WalletApp({
               date: installmentDate,
               category,
               confirmed: installmentDate <= getToday(),
+              details,
             };
           });
         })()
@@ -362,6 +369,7 @@ export default function WalletApp({
           type,
           date,
           category,
+          details,
           confirmed: date <= getToday(),
         }];
 
@@ -998,7 +1006,18 @@ export default function WalletApp({
               />
             </div>
 
-                    <div className="segmented-control grid-cols-3">
+            <label className="details-field">
+              <span>Details</span>
+              <textarea
+                maxLength={160}
+                onChange={(event) => setDetails(event.target.value)}
+                placeholder="Add a note (optional)"
+                rows={2}
+                value={details}
+              />
+            </label>
+
+            <div className="segmented-control grid-cols-3">
               <button
                 className={type === "expense" ? "selected" : ""}
                 onClick={() => setType("expense")}
@@ -1115,22 +1134,8 @@ export default function WalletApp({
                           </button>
                         ))}
                       </div>
-                      <label className="mt-4 flex items-center justify-between gap-4 text-sm">
-                        <span className="font-medium text-[#171715]">Total occurrences</span>
-                        <input
-                          aria-label="Total occurrences"
-                          className="w-20 rounded-xl border border-black/[0.12] bg-white px-3 py-2 text-center"
-                          max={60}
-                          min={2}
-                          onChange={(event) => setFixedExpenseCount(event.target.value)}
-                          type="number"
-                          value={fixedExpenseCount}
-                        />
-                      </label>
                       <p className="mt-3 text-xs text-[#777772]">
-                        {Number.isInteger(numberOfFixedOccurrences) && numberOfFixedOccurrences >= 2 && numberOfFixedOccurrences <= 60
-                          ? `Creates ${numberOfFixedOccurrences} scheduled expenses at ${formatMoney(numericAmount || 0)} each.`
-                          : "Choose between 2 and 60 occurrences."}
+                        {`Creates ${fixedExpenseOccurrences} scheduled expenses at ${formatMoney(numericAmount || 0)} each.`}
                       </p>
                     </div>
                   )}
@@ -1206,9 +1211,7 @@ export default function WalletApp({
               disabled={
                 !Number.parseFloat(amount) ||
                 (instalmentsEnabled &&
-                  (!Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60)) ||
-                (fixedExpenseEnabled &&
-                  (!Number.isInteger(numberOfFixedOccurrences) || numberOfFixedOccurrences < 2 || numberOfFixedOccurrences > 60))
+                  (!Number.isInteger(numberOfInstalments) || numberOfInstalments < 2 || numberOfInstalments > 60))
               }
               onClick={saveEntry}
               type="button"
@@ -1273,6 +1276,12 @@ export default function WalletApp({
                 <span>Category</span>
                 <strong>{selectedEntry.category}</strong>
               </div>
+              {selectedEntry.details?.trim() && (
+                <div>
+                  <span>Details</span>
+                  <strong>{selectedEntry.details}</strong>
+                </div>
+              )}
             </div>
 
             {selectedEntryIsUpcoming && (

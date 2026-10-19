@@ -7,5 +7,6 @@ export type Entry = {
   type: EntryType;
   date: string;
   category: string;
+  details?: string;
   confirmed?: boolean;
 };

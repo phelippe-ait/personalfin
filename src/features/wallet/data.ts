@@ -8,6 +8,7 @@ type EntryRow = {
   type: Entry["type"]
   entry_date: string
   category: string
+  details: string | null
   confirmed: boolean
 }
 
@@ -47,6 +48,7 @@ export async function migrateLegacyData(userId: string) {
       type: entry.type,
       entry_date: entry.date,
       category: entry.category,
+      details: entry.details ?? "",
       confirmed: entry.confirmed ?? entry.date <= getToday(),
     }))
     if (entries.length) {
@@ -85,7 +87,7 @@ export async function loadWalletData(userId: string) {
   const [entriesResult, categoriesResult] = await Promise.all([
     getSupabase()
       .from("wallet_entries")
-      .select("id, amount, type, entry_date, category, confirmed")
+      .select("id, amount, type, entry_date, category, details, confirmed")
       .eq("user_id", userId)
       .order("entry_date", { ascending: false }),
     getSupabase()
@@ -120,6 +122,7 @@ export async function loadWalletData(userId: string) {
           type: row.type,
           date: row.entry_date,
           category: row.category,
+          details: row.details ?? "",
           confirmed: row.confirmed,
         }) satisfies Entry,
     ),
@@ -135,6 +138,7 @@ export async function saveWalletEntry(userId: string, entry: Entry) {
     type: entry.type,
     entry_date: entry.date,
     category: entry.category,
+    details: entry.details ?? "",
     confirmed: entry.confirmed ?? false,
   })
   if (error) throw error
@@ -151,6 +155,7 @@ export async function saveWalletEntries(userId: string, entries: Entry[]) {
         type: entry.type,
         entry_date: entry.date,
         category: entry.category,
+        details: entry.details ?? "",
         confirmed: entry.confirmed ?? false,
       })),
     )

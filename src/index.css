@@ -908,6 +908,37 @@ button {
   color: #b9b9b4;
 }
 
+.details-field {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 20px;
+  color: #777772;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.details-field textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 12px 14px;
+  outline: 0;
+  background: rgba(255, 255, 255, 0.58);
+  color: #171715;
+  font-size: 0.9rem;
+  font-weight: 450;
+}
+
+.details-field textarea:focus {
+  border-color: rgba(23, 23, 21, 0.35);
+}
+
+.details-field textarea::placeholder {
+  color: #a4a49e;
+}
+
 .segmented-control {
   display: grid;
   grid-template-columns: 1fr 1fr;
