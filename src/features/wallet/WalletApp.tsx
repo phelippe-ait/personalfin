@@ -9,29 +9,31 @@ import {
   getToday,
 } from "./utils";
 import type { Entry, EntryType, Page } from "./types";
+import {
+  deleteWalletEntry,
+  loadWalletData,
+  migrateLegacyData,
+  renameWalletCategory,
+  saveWalletCategory,
+  saveWalletEntry,
+} from "./data";
 
-export default function WalletApp() {
-  const [entries, setEntries] = useState<Entry[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("mono-entries") || "[]");
-    } catch {
-      return [];
-    }
-  });
-  const [categoryOptions, setCategoryOptions] = useState<string[]>(() => {
-    try {
-      const saved = JSON.parse(
-        localStorage.getItem("mono-categories") || "null",
-      );
-      return Array.isArray(saved) &&
-        saved.length > 0 &&
-        saved.every((item) => typeof item === "string")
-        ? saved
-        : defaultCategories;
-    } catch {
-      return defaultCategories;
-    }
-  });
+type WalletAppProps = {
+  userId: string;
+  userEmail: string;
+  onSignOut: () => Promise<unknown>;
+};
+
+export default function WalletApp({
+  userId,
+  userEmail,
+  onSignOut,
+}: WalletAppProps) {
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [categoryOptions, setCategoryOptions] =
+    useState<string[]>(defaultCategories);
+  const [loading, setLoading] = useState(true);
+  const [dataError, setDataError] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [page, setPage] = useState<Page>("home");
   const [amount, setAmount] = useState("");
@@ -47,12 +49,32 @@ export default function WalletApp() {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("mono-entries", JSON.stringify(entries));
-  }, [entries]);
-
-  useEffect(() => {
-    localStorage.setItem("mono-categories", JSON.stringify(categoryOptions));
-  }, [categoryOptions]);
+    let cancelled = false;
+    const initialize = async () => {
+      setLoading(true);
+      setDataError("");
+      try {
+        await migrateLegacyData(userId);
+        const data = await loadWalletData(userId);
+        if (!cancelled) {
+          setEntries(data.entries);
+          setCategoryOptions(data.categories);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setDataError(
+            error instanceof Error ? error.message : "Could not load wallet data.",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void initialize();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
     document.body.style.overflow =
@@ -162,7 +184,7 @@ export default function WalletApp() {
     setSheetOpen(true);
   };
 
-  const addCategory = (value: string) => {
+  const addCategory = async (value: string) => {
     const name = value.trim();
     if (
       !name ||
@@ -172,11 +194,20 @@ export default function WalletApp() {
     ) {
       return false;
     }
-    setCategoryOptions((current) => [...current, name]);
-    return true;
+    try {
+      await saveWalletCategory(userId, name);
+      setCategoryOptions((current) => [...current, name]);
+      setDataError("");
+      return true;
+    } catch (error) {
+      setDataError(
+        error instanceof Error ? error.message : "Could not save category.",
+      );
+      return false;
+    }
   };
 
-  const saveCategoryName = () => {
+  const saveCategoryName = async () => {
     if (!editingCategory) return;
     const name = categoryDraft.trim();
     if (
@@ -187,6 +218,14 @@ export default function WalletApp() {
           option.toLocaleLowerCase() === name.toLocaleLowerCase(),
       )
     ) {
+      return;
+    }
+    try {
+      await renameWalletCategory(userId, editingCategory, name);
+    } catch (error) {
+      setDataError(
+        error instanceof Error ? error.message : "Could not rename category.",
+      );
       return;
     }
     setCategoryOptions((current) =>
@@ -214,36 +253,37 @@ export default function WalletApp() {
     setSheetOpen(true);
   };
 
-  const saveEntry = () => {
+  const saveEntry = async () => {
     const numericAmount = Number.parseFloat(amount);
     if (!numericAmount || numericAmount <= 0) return;
 
-    setEntries((current) =>
-      editingEntryId
-        ? current.map((entry) =>
-            entry.id === editingEntryId
-              ? {
-                  ...entry,
-                  amount: numericAmount,
-                  type,
-                  date,
-                  category,
-                  confirmed: date <= getToday(),
-                }
-              : entry,
-          )
-        : [
-            ...current,
-            {
-              id: crypto.randomUUID(),
-              amount: numericAmount,
-              type,
-              date,
-              category,
-              confirmed: date <= getToday(),
-            },
-          ],
-    );
+    const updatedEntry: Entry = {
+      ...(editingEntryId
+        ? entries.find((entry) => entry.id === editingEntryId)
+        : undefined),
+      id: editingEntryId || crypto.randomUUID(),
+      amount: numericAmount,
+      type,
+      date,
+      category,
+      confirmed: date <= getToday(),
+    };
+    try {
+      await saveWalletEntry(userId, updatedEntry);
+      setEntries((current) =>
+        editingEntryId
+          ? current.map((entry) =>
+              entry.id === editingEntryId ? updatedEntry : entry,
+            )
+          : [...current, updatedEntry],
+      );
+      setDataError("");
+    } catch (error) {
+      setDataError(
+        error instanceof Error ? error.message : "Could not save transaction.",
+      );
+      return;
+    }
     setEditingEntryId(null);
     setSheetOpen(false);
   };
@@ -287,6 +327,14 @@ export default function WalletApp() {
     return positions[target] < positions[page] ? "page-right" : "page-left";
   };
 
+  if (loading) {
+    return (
+      <main className="grid min-h-[100dvh] place-items-center bg-[#e8e8e4] text-sm text-[#777772]">
+        Loading your wallet…
+      </main>
+    );
+  }
+
   return (
     <main
       className="app-shell"
@@ -297,6 +345,14 @@ export default function WalletApp() {
       }}
     >
       <div className="noise" />
+      {dataError && (
+        <div
+          className="fixed top-3 right-3 left-3 z-50 mx-auto max-w-lg rounded-xl border border-red-200 bg-white px-4 py-3 text-sm text-red-800 shadow-lg"
+          role="alert"
+        >
+          {dataError}
+        </div>
+      )}
 
       <section
         aria-hidden={page !== "home"}
@@ -605,9 +661,19 @@ export default function WalletApp() {
           >
             <Icon name="arrow-left" />
           </button>
-          <span className="settings-count">
-            {categoryOptions.length} categories
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="settings-count">
+              {categoryOptions.length} categories
+            </span>
+            <button
+              className="text-button"
+              onClick={() => void onSignOut()}
+              title={userEmail}
+              type="button"
+            >
+              Sign out
+            </button>
+          </div>
         </header>
 
         <div className="history-title">
@@ -674,7 +740,9 @@ export default function WalletApp() {
           className="add-category-card"
           onSubmit={(event) => {
             event.preventDefault();
-            if (addCategory(settingsCategory)) setSettingsCategory("");
+            void addCategory(settingsCategory).then((added) => {
+              if (added) setSettingsCategory("");
+            });
           }}
         >
           <div>
@@ -891,10 +959,11 @@ export default function WalletApp() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   const name = newCategory.trim();
-                  if (addCategory(name)) {
+                  void addCategory(name).then((added) => {
+                    if (!added) return;
                     setCategory(name);
                     setNewCategory("");
-                  }
+                  });
                 }}
               >
                 <input
@@ -994,16 +1063,26 @@ export default function WalletApp() {
               </button>
               <button
                 className="delete-button"
-                onClick={() => {
+                onClick={async () => {
                   if (
                     window.confirm(
                       "Delete this transaction? This cannot be undone.",
                     )
                   ) {
-                    setEntries((current) =>
-                      current.filter((entry) => entry.id !== selectedEntry.id),
-                    );
-                    setSelectedEntryId(null);
+                    try {
+                      await deleteWalletEntry(userId, selectedEntry.id);
+                      setEntries((current) =>
+                        current.filter((entry) => entry.id !== selectedEntry.id),
+                      );
+                      setSelectedEntryId(null);
+                      setDataError("");
+                    } catch (error) {
+                      setDataError(
+                        error instanceof Error
+                          ? error.message
+                          : "Could not delete transaction.",
+                      );
+                    }
                   }
                 }}
                 type="button"
@@ -1014,15 +1093,28 @@ export default function WalletApp() {
             {selectedEntryIsUpcoming && (
               <button
                 className="save-button"
-                onClick={() => {
-                  setEntries((current) =>
-                    current.map((entry) =>
-                      entry.id === selectedEntry.id
-                        ? { ...entry, confirmed: true, date: getToday() }
-                        : entry,
-                    ),
-                  );
-                  setSelectedEntryId(null);
+                onClick={async () => {
+                  const confirmedEntry = {
+                    ...selectedEntry,
+                    confirmed: true,
+                    date: getToday(),
+                  };
+                  try {
+                    await saveWalletEntry(userId, confirmedEntry);
+                    setEntries((current) =>
+                      current.map((entry) =>
+                        entry.id === selectedEntry.id ? confirmedEntry : entry,
+                      ),
+                    );
+                    setSelectedEntryId(null);
+                    setDataError("");
+                  } catch (error) {
+                    setDataError(
+                      error instanceof Error
+                        ? error.message
+                        : "Could not confirm transaction.",
+                    );
+                  }
                 }}
                 type="button"
               >
