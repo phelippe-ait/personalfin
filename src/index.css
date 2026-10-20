@@ -554,6 +554,11 @@ button {
 .upcoming-list {
   display: flex;
   flex-direction: column;
+}
+
+.upcoming-month-list {
+  display: flex;
+  flex-direction: column;
   gap: 9px;
 }
 

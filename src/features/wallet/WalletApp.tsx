@@ -168,6 +168,23 @@ export default function WalletApp({
     [entries],
   );
 
+  const monthlyUpcoming = useMemo(() => {
+    const months = upcomingEntries.reduce<
+      Record<string, { entries: Entry[]; expense: number; income: number }>
+    >((groups, entry) => {
+      const month = entry.date.slice(0, 7);
+      groups[month] ||= { entries: [], expense: 0, income: 0 };
+      groups[month].entries.push(entry);
+      groups[month][entry.type] += entry.amount;
+      return groups;
+    }, {});
+
+    return Object.entries(months).map(([month, summary]) => ({
+      month,
+      ...summary,
+    }));
+  }, [upcomingEntries]);
+
   const selectedEntry =
     entries.find((entry) => entry.id === selectedEntryId) || null;
   const selectedEntryIsUpcoming = selectedEntry
@@ -913,40 +930,56 @@ export default function WalletApp({
               </button>
             </div>
           ) : (
-            upcomingEntries.map((entry) => (
-              <button
-                className="upcoming-entry"
-                key={entry.id}
-                onClick={() => setSelectedEntryId(entry.id)}
-                type="button"
-              >
-                <span className="upcoming-date">
-                  <small>
-                    {new Intl.DateTimeFormat("en-US", {
-                      month: "short",
-                    }).format(new Date(`${entry.date}T12:00:00`))}
-                  </small>
-                  <strong>
-                    {new Date(`${entry.date}T12:00:00`).getDate()}
-                  </strong>
-                </span>
-                <span className="category-icon">
-                  <Icon
-                    name={categoryIcons[entry.category] || "circle"}
-                    size={20}
-                  />
-                </span>
-                <span className="upcoming-copy">
-                  <strong>{entry.category}</strong>
-                  <small>
-                    {entry.type === "income" ? "Expected income" : "Payment due"}
-                  </small>
-                </span>
-                <strong className="upcoming-amount">
-                  {entry.type === "income" ? "+" : "−"}
-                  {formatMoney(entry.amount)}
-                </strong>
-              </button>
+            monthlyUpcoming.map((summary) => (
+              <div className="month-group" key={summary.month}>
+                <div className="month-heading">
+                  <div>
+                    <p className="eyebrow">Monthly breakdown</p>
+                    <h2>{formatMonth(summary.month)}</h2>
+                  </div>
+                  <div className="month-totals">
+                    <span>Due {formatMoney(summary.expense)}</span>
+                    <span>In {formatMoney(summary.income)}</span>
+                  </div>
+                </div>
+                <div className="upcoming-month-list">
+                  {summary.entries.map((entry) => (
+                    <button
+                      className="upcoming-entry"
+                      key={entry.id}
+                      onClick={() => setSelectedEntryId(entry.id)}
+                      type="button"
+                    >
+                      <span className="upcoming-date">
+                        <small>
+                          {new Intl.DateTimeFormat("en-US", {
+                            month: "short",
+                          }).format(new Date(`${entry.date}T12:00:00`))}
+                        </small>
+                        <strong>
+                          {new Date(`${entry.date}T12:00:00`).getDate()}
+                        </strong>
+                      </span>
+                      <span className="category-icon">
+                        <Icon
+                          name={categoryIcons[entry.category] || "circle"}
+                          size={20}
+                        />
+                      </span>
+                      <span className="upcoming-copy">
+                        <strong>{entry.category}</strong>
+                        <small>
+                          {entry.type === "income" ? "Expected income" : "Payment due"}
+                        </small>
+                      </span>
+                      <strong className="upcoming-amount">
+                        {entry.type === "income" ? "+" : "−"}
+                        {formatMoney(entry.amount)}
+                      </strong>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))
           )}
         </div>
